@@ -1,0 +1,37 @@
+# Terraform and Git working data
+.git/
+.terraform/
+.reports/
+
+# Local variables and credentials
+.env*
+*.tfvars
+*.tfvars.json
+.terraformrc
+terraform.rc
+credentials.tfrc.json
+
+# State, lock metadata, and saved plans
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+*.tfplan
+tfplan*
+*.plan
+plan.out
+
+# Private keys and certificates
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
