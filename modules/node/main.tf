@@ -2,7 +2,7 @@ resource "hcloud_server" "this" {
   name        = var.name
   server_type = var.server_type
   image       = var.image
-  ssh_keys = [ "Hetzner Neu" ]
+  ssh_keys = [ var.ssh_key_id ]
   firewall_ids = var.firewall_ids
   network {
     network_id = var.network_id

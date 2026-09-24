@@ -1,6 +1,6 @@
 
 
-variable "ssh_public_key" {
+variable "SSH_PUBLIC_KEY" {
   type = string
 }
 

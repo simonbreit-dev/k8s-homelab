@@ -3,7 +3,7 @@ terraform {
   required_providers {
     hcloud = {
       source  = "hetznercloud/hcloud"
-      version = "1.60.1"
+      version = "1.69.0"
     }
 
     tailscale = {
@@ -33,6 +33,11 @@ resource "tailscale_tailnet_key" "node" {
   tags = [
     "tag:k8s-node"
   ]
+}
+
+resource "hcloud_ssh_key" "ssh_key" {
+  name = "k8s-lab-ssh-key"
+  public_key = var.SSH_PUBLIC_KEY
 }
 
 resource "hcloud_firewall" "k8s-lab-firewall" {
@@ -68,7 +73,7 @@ module "nodes" {
   name        = "k8s-lab-node-${count.index + 1}"
   server_type = var.node_server_type
   image       = var.node_image
-
+  ssh_key_id = hcloud_ssh_key.ssh_key.id
   firewall_ids = [hcloud_firewall.k8s-lab-firewall.id]
   network_id = hcloud_network.k8s.id
   tailscale_auth_key = tailscale_tailnet_key.node[count.index].key

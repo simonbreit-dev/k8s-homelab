@@ -18,3 +18,7 @@ variable "firewall_ids" {
 variable "network_id" {
   type = number
 }
+
+variable "ssh_key_id" {
+  type = string
+}
