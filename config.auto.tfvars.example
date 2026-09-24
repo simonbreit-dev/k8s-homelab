@@ -2,11 +2,11 @@
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIReplaceMe user@example"
 
 # Optional overrides; the values shown here are the project defaults.
+manage_known_hosts  = false
 node_count          = 3
-node_server_type    = "cx23"
 node_image          = "ubuntu-24.04"
 node_location       = "nbg1"
 node_name_prefix    = "k8s-lab-node"
-tailscale_tag       = "tag:k8s-node"
+node_server_type    = "cx23"
 public_ipv4_enabled = true
-manage_known_hosts = false
+tailscale_tag       = "tag:k8s-node"

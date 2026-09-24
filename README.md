@@ -1,288 +1,170 @@
 # Disposable Kubernetes Lab on Hetzner Cloud
 
-This repository provisions disposable Hetzner Cloud servers with Terraform and connects them to a Tailscale tailnet. It is a small, single-developer learning project and a public reference for Terraform, HCP Terraform, Hetzner Cloud, cloud-init, and Tailscale integration.
-
-The current Terraform configuration creates the infrastructure foundation only. It does **not** install or configure Kubernetes yet.
+Terraform configuration for disposable Hetzner Cloud nodes connected through Tailscale. The repository currently provisions the infrastructure foundation; it does not install Kubernetes.
 
 ## What it creates
 
-- A Hetzner Cloud private network using the 10.0.0.0/16 range.
-- A 10.0.1.0/24 cloud-network subnet in the eu-central network zone.
-- A shared Hetzner Cloud firewall.
-- A configurable number of servers attached to the private network.
-- A Hetzner Cloud SSH key created from a supplied OpenSSH public key.
-- One short-lived Tailscale authentication key per server.
-- Cloud-init configuration that installs Tailscale and registers each server as an ephemeral node.
+- A private Hetzner network and subnet.
+- A shared firewall that permits inbound Tailscale UDP traffic and blocks other public ingress.
+- A Terraform-managed Hetzner SSH key.
+- A configurable number of servers with explicit location, image, IPv4, and hostname settings.
+- One reusable, preauthorized Tailscale key per server. Registered nodes are ephemeral.
+- Cloud-init that hardens SSH, installs Tailscale, and joins the node to the tailnet.
 
-Each server currently has:
+## Structure
 
-- A public IPv4 address by default; it can be disabled with `public_ipv4_enabled = false`.
-- A public IPv6 address for outbound connectivity and Tailscale bootstrap.
-- Only inbound UDP port 41641 permitted by the Hetzner firewall.
-- All other inbound public traffic, including public SSH, denied by the Hetzner firewall.
-- OpenSSH available over the Tailscale network using the Terraform-managed Hetzner Cloud SSH key.
+```text
+.
+├── backend.tf                    # HCP Terraform cloud configuration
+├── terraform.tf                  # Terraform and provider requirements
+├── providers.tf                  # Provider configuration
+├── main.tf                       # Shared infrastructure and node module calls
+├── known_hosts.tf                # Optional local known-hosts management
+├── variables.tf                  # Root input variables
+├── config.auto.tfvars.example    # Non-secret example configuration
+├── .terraform.lock.hcl           # Locked provider selections
+├── .terraformignore              # HCP configuration-upload exclusions
+├── LICENSE
+├── scripts/
+│   └── update-known-host.sh
+└── modules/
+    └── node/
+        ├── terraform.tf
+        ├── main.tf
+        ├── variables.tf
+        ├── outputs.tf
+        └── templates/
+            └── cloud-init.yml
+```
 
-## Scope and assumptions
-
-- The lab is used by one developer at a time.
-- Servers and related resources are expected to be created and destroyed frequently.
-- The configuration is not designed as a production Kubernetes platform.
-- There is no automatic GitHub Actions workflow or automatic apply. Formatting, validation, plans, applies, and destroys are run manually.
-- Scale-to-zero is intentionally unsupported; use `terraform destroy` when the lab is not needed.
-
-## Repository layout
-
-    .
-    ├── main.tf                         # Providers and shared infrastructure
-    ├── variables.tf                    # Root input variables
-    ├── outputs.tf                      # Reserved for future useful outputs
-    ├── config.auto.tfvars.example      # Example non-secret configuration
-    ├── .terraform.lock.hcl             # Locked provider versions and checksums
-    └── modules/
-        └── node/
-            ├── main.tf                 # Hetzner server
-            ├── variables.tf
-            ├── providers.tf
-            └── templates/
-                └── cloud-init.yml      # SSH hardening and Tailscale bootstrap
+`modules/node` is an internal module that owns one server and its bootstrap lifecycle.
 
 ## Prerequisites
 
-### Local tools
-
 - Terraform 1.16.4.
-- Optional: direnv for loading .env.local through the committed .envrc.
-- An SSH client and a device connected to the target Tailscale tailnet.
+- A Hetzner Cloud project and API token.
+- A Tailscale OAuth client with the `auth_keys` scope and permission to assign `tag:k8s-node` or the configured replacement.
+- A tailnet policy that permits the required access to that tag.
+- An OpenSSH public key and its matching private key.
+- An HCP Terraform organization and workspace.
 
-The repository pins:
+For HCP remote execution, provider credentials must be HCP workspace **environment variables**:
 
-- hetznercloud/hcloud 1.69.0
-- tailscale/tailscale 0.29.2
+```text
+HCLOUD_TOKEN
+TAILSCALE_OAUTH_CLIENT_ID
+TAILSCALE_OAUTH_CLIENT_SECRET
+```
 
-Keep .terraform.lock.hcl committed so all environments use the same provider builds.
+Keep them out of Terraform variables and tfvars files.
 
-### Accounts and external configuration
+## HCP Terraform
 
-You need:
+Authenticate the CLI and select the workspace externally:
 
-1. A Hetzner Cloud project and a read/write API token.
-2. An OpenSSH public key whose matching private key is available locally.
-3. A Tailscale tailnet.
-4. A Tailscale OAuth client with:
-   - The auth_keys scope.
-   - Permission to create keys carrying the configured `tailscale_tag` (`tag:k8s-node` by default).
-5. A Tailscale access policy that allows your developer device to reach that tag.
-6. An existing HCP Terraform organization and workspace.
-
-The provider uses tailnet = "-", so it operates on the tailnet that owns the supplied Tailscale OAuth credentials.
-
-## HCP Terraform configuration
-
-The empty cloud block deliberately avoids committing a personal HCP organization or workspace name.
-
-Authenticate the local Terraform CLI:
-
-~~~shell
+```shell
 terraform login
-~~~
-
-Select the existing HCP organization and workspace in your local shell:
-
-~~~shell
 export TF_CLOUD_ORGANIZATION="your-organization"
 export TF_WORKSPACE="your-workspace"
-~~~
+```
 
-Set the HCP workspace Terraform version to 1.16.4.
+Set the HCP workspace Terraform version to 1.16.4. Add `ssh_public_key` as a workspace Terraform variable; all other Terraform inputs have defaults and only need values when overridden. Local tfvars and environment files are excluded from HCP uploads through `.terraformignore`.
 
-For the default HCP remote-execution mode, configure these as **sensitive environment variables** in the HCP workspace:
+For local execution, the committed `.envrc` can load an ignored `.env.local`:
 
-- HCLOUD_TOKEN
-- TAILSCALE_OAUTH_CLIENT_ID
-- TAILSCALE_OAUTH_CLIENT_SECRET
-
-Configure `ssh_public_key` as an HCP workspace **Terraform variable**. It must contain the complete OpenSSH public key, for example the contents of `~/.ssh/id_ed25519.pub`.
-
-The remaining Terraform variables have project defaults and only need workspace values when you want to override them:
-
-- node_count
-- node_server_type
-- node_image
-- node_location
-- node_name_prefix
-- tailscale_tag
-- public_ipv4_enabled
-
-The local tfvars files are intentionally excluded from HCP configuration uploads. Remote runs therefore receive input values from the workspace, not from config.auto.tfvars.
-
-## Optional local environment
-
-If the HCP workspace uses local execution, or for local provider commands, .envrc loads an ignored .env.local file when direnv is installed.
-
-Example:
-
-~~~dotenv
+```dotenv
 HCLOUD_TOKEN=replace-me
 TAILSCALE_OAUTH_CLIENT_ID=replace-me
 TAILSCALE_OAUTH_CLIENT_SECRET=replace-me
 TF_CLOUD_ORGANIZATION=your-organization
 TF_WORKSPACE=your-workspace
-~~~
+```
 
-Then enable it:
+Run `direnv allow` after creating the file.
 
-~~~shell
-direnv allow
-~~~
+## Configuration
 
-Never commit .env.local. Both Git and HCP Terraform upload rules exclude it.
+Copy the example for local execution:
 
-## Terraform inputs
-
-The non-secret example is:
-
-~~~hcl
-ssh_public_key = "ssh-ed25519 AAAA... user@example"
-
-node_count          = 3
-node_server_type    = "cx23"
-node_image          = "ubuntu-24.04"
-node_location       = "nbg1"
-node_name_prefix    = "k8s-lab-node"
-tailscale_tag       = "tag:k8s-node"
-public_ipv4_enabled = true
-~~~
-
-Only `ssh_public_key` is required. The other values shown are the defaults. `node_count` is restricted to 1 through 10 as a cost-safety guard. Public IPv4 addresses can incur an additional charge.
-
-At plan time, Terraform resolves `node_server_type` to its CPU architecture and `node_image` to the matching concrete Hetzner image ID. The explicit `node_location` prevents Hetzner from selecting a location implicitly. Because the default image is a moving system-image name, a later plan can resolve a newer image ID and propose replacing existing nodes; always review the plan before applying.
-
-For local execution, copy it:
-
-~~~shell
+```shell
 cp config.auto.tfvars.example config.auto.tfvars
-~~~
+```
 
-For HCP remote execution, configure the same values as workspace Terraform variables instead.
+Only `ssh_public_key` is required. Project defaults are:
 
-## Provisioning
+| Variable | Default |
+| --- | --- |
+| `manage_known_hosts` | `false` |
+| `node_count` | `3` |
+| `node_image` | `ubuntu-24.04` |
+| `node_location` | `nbg1` |
+| `node_name_prefix` | `k8s-lab-node` |
+| `node_server_type` | `cx23` |
+| `public_ipv4_enabled` | `true` |
+| `tailscale_tag` | `tag:k8s-node` |
 
-Initialize the working directory:
+`node_count` is limited to 1–10. Public IPv4 addresses can incur an additional charge. The system-image name is resolved to a concrete image ID for the selected server architecture during planning; a later plan can therefore select a newer image and replace nodes.
 
-~~~shell
+## Workflow
+
+```shell
 terraform init
-~~~
-
-Run local static checks:
-
-~~~shell
 terraform fmt -check -recursive
 terraform validate
-~~~
-
-Review and apply:
-
-~~~shell
 terraform plan
 terraform apply
-~~~
+```
 
-With HCP remote execution, plan and apply run in the selected HCP workspace. The local directory is uploaded according to .terraformignore.
+With the `cloud` block, plan and apply use the selected HCP workspace unless that workspace is configured for local execution.
 
-## Verifying provisioning
+Terraform considers a server created before cloud-init and Tailscale registration necessarily finish. Verify the result with:
 
-Hetzner server creation completes before cloud-init and Tailscale registration are necessarily finished. A successful Terraform apply therefore does not guarantee that every node has joined the tailnet.
-
-Check the Tailscale admin console or run the following from an existing tailnet device:
-
-~~~shell
+```shell
 tailscale status
-~~~
+```
 
-Expected node names are:
+For bootstrap failures, use the Hetzner console:
 
-- k8s-lab-node-1
-- k8s-lab-node-2
-- and so on, according to node_count.
-
-These examples assume the default `node_name_prefix`.
-
-If a node does not appear, use the Hetzner web console and inspect:
-
-~~~shell
+```shell
 cloud-init status --wait
 sudo journalctl -u cloud-init
 sudo journalctl -u tailscaled
 sudo tailscale status
-~~~
+```
 
-The Tailscale key expires after one hour, is single-use, and is not reusable. If bootstrap fails after the key expires or is consumed, replace the affected key and server together.
+## SSH and known hosts
 
-Example for the first node:
+Public SSH is blocked by the Hetzner firewall. Connect through Tailscale MagicDNS:
 
-~~~shell
-terraform apply \
-  -replace='tailscale_tailnet_key.node[0]' \
-  -replace='module.nodes[0].hcloud_server.this'
-~~~
-
-## Connecting to a node
-
-Public SSH is blocked by the Hetzner firewall. Connect through Tailscale using regular OpenSSH and the private key matching `ssh_public_key`:
-
-~~~shell
+```shell
 ssh root@k8s-lab-node-1
-~~~
+```
 
-This assumes Tailscale MagicDNS is enabled. Otherwise, use the node's Tailscale IP from tailscale status or the admin console.
+When `manage_known_hosts = true`, Terraform runs `scripts/update-known-host.sh` after creating each node and writes scanned keys to `~/.ssh/known_hosts_k8s_lab` in the environment running Terraform. Use that file explicitly:
 
-The current cloud-init command does not enable Tailscale SSH; it installs Tailscale as a network transport for ordinary OpenSSH.
+```shell
+ssh -o UserKnownHostsFile="$HOME/.ssh/known_hosts_k8s_lab" root@k8s-lab-node-1
+```
+
+This option is intended for local execution. An HCP remote worker cannot populate the developer machine's known-hosts file.
 
 ## Destroy and cleanup
 
-Destroy the lab when it is no longer needed:
-
-~~~shell
+```shell
 terraform destroy
-~~~
+```
 
-Terraform owns and destroys:
+Before deleting a server, Terraform makes a best-effort SSH call to `tailscale logout`; failure does not block destruction. Registered Tailscale devices are cloud-init side effects rather than Terraform resources, so verify the Tailscale admin console after destroy and remove stale devices if necessary.
 
-- Hetzner servers.
-- The Hetzner SSH key created from `ssh_public_key`.
-- The Hetzner firewall.
-- The private network and subnet.
-- Tailscale authentication-key resources.
+The authentication keys are reusable, preauthorized, and recreated when invalid. They use the provider's 90-day default expiry. Nodes registered with them are ephemeral.
 
-Terraform does **not** own the Tailscale device records created when the servers register. The current keys create ephemeral nodes, so Tailscale removes them automatically after the destroyed servers have been offline for a while. Cleanup is not immediate.
-
-After destroy:
-
-1. Confirm that the Hetzner servers, firewall, network, subnet, and Primary IP resources are gone.
-2. Check the Tailscale admin console for stale nodes.
-3. Manually remove any node that does not disappear automatically.
-
-If destroy fails partway through, restore valid provider credentials and run terraform destroy again. Hetzner resources that remain continue to incur cost.
-
-## Security and secret handling
-
-- Provider credentials are supplied through environment variables, never Terraform input variables.
-- .gitignore excludes local credentials, tfvars, state, saved plans, private keys, and local editor files.
-- .terraformignore separately excludes those files from HCP Terraform configuration uploads.
-- HCP Terraform state can contain generated Tailscale keys and rendered server user-data. Restrict access to the workspace and its state.
-- The Tailscale keys are short-lived, single-use, preauthorized, tagged, and create ephemeral nodes.
-- The Hetzner firewall is the enforcement boundary preventing public SSH and accidental exposure of future services.
-- The current Tailscale installer is downloaded at boot from tailscale.com and is not version-pinned. This is an accepted convenience for this disposable lab, not a production supply-chain pattern.
-
-## Known limitations
+## Limitations
 
 - Kubernetes installation and cluster bootstrapping are not implemented.
-- Private-network ranges and behavior remain project conventions rather than inputs.
-- The system-image name can resolve to a newer concrete image ID in a later plan.
-- Cloud-init is initialization, not ongoing configuration management.
-- Terraform cannot directly verify or immediately delete the Tailscale device created by a node.
-- Partial server replacement requires replacing its single-use Tailscale key as well.
-- There is no automated CI/CD workflow by design; checks are run manually.
+- Cloud-init is asynchronous initialization, not ongoing configuration management.
+- The Tailscale installer is downloaded and executed at boot without a pinned version.
+- Private-network ranges and shared resource names are project conventions.
+- There is no automated CI/CD workflow; checks and Terraform operations are manual.
 
 ## License
 

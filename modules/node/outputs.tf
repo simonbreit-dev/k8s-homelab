@@ -1,7 +1,9 @@
 output "hostname" {
-  value = hcloud_server.this.name
+  description = "Hostname assigned to the node."
+  value       = hcloud_server.this.name
 }
 
 output "id" {
-  value = hcloud_server.this.id
+  description = "Hetzner Cloud server ID of the node."
+  value       = hcloud_server.this.id
 }
