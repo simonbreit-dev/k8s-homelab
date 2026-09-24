@@ -24,33 +24,42 @@ provider "tailscale" {
   scopes  = ["auth_keys"]
 }
 
+data "hcloud_server_type" "node" {
+  name = var.node_server_type
+}
+
+data "hcloud_image" "node" {
+  name              = var.node_image
+  with_architecture = data.hcloud_server_type.node.architecture
+}
+
 resource "tailscale_tailnet_key" "node" {
-  count =  var.node_count
+  count         = var.node_count
   reusable      = false
   ephemeral     = true
   preauthorized = true
   expiry        = 3600
   tags = [
-    "tag:k8s-node"
+    var.tailscale_tag
   ]
 }
 
 resource "hcloud_ssh_key" "ssh_key" {
-  name = "k8s-lab-ssh-key"
-  public_key = var.SSH_PUBLIC_KEY
+  name       = "k8s-lab-ssh-key"
+  public_key = trimspace(var.ssh_public_key)
 }
 
 resource "hcloud_firewall" "k8s-lab-firewall" {
-    name = "k8s-lab-firewall"
-    rule {
-      direction = "in"
-      port = "41641"
-      protocol = "udp"
-      source_ips = [
-        "0.0.0.0/0",
-        "::/0"
-      ]
-    }
+  name = "k8s-lab-firewall"
+  rule {
+    direction = "in"
+    port      = "41641"
+    protocol  = "udp"
+    source_ips = [
+      "0.0.0.0/0",
+      "::/0"
+    ]
+  }
 }
 
 resource "hcloud_network" "k8s" {
@@ -70,11 +79,13 @@ module "nodes" {
 
   source = "./modules/node"
 
-  name        = "k8s-lab-node-${count.index + 1}"
-  server_type = var.node_server_type
-  image       = var.node_image
-  ssh_key_id = hcloud_ssh_key.ssh_key.id
-  firewall_ids = [hcloud_firewall.k8s-lab-firewall.id]
-  network_id = hcloud_network.k8s.id
-  tailscale_auth_key = tailscale_tailnet_key.node[count.index].key
+  name                = "${var.node_name_prefix}-${count.index + 1}"
+  server_type         = data.hcloud_server_type.node.name
+  image               = tostring(data.hcloud_image.node.id)
+  location            = var.node_location
+  public_ipv4_enabled = var.public_ipv4_enabled
+  ssh_key_id          = hcloud_ssh_key.ssh_key.id
+  firewall_ids        = [hcloud_firewall.k8s-lab-firewall.id]
+  network_id          = hcloud_network.k8s.id
+  tailscale_auth_key  = tailscale_tailnet_key.node[count.index].key
 }
