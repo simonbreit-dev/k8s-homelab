@@ -20,3 +20,4 @@ runcmd:
   - systemctl reload ssh || systemctl reload sshd
   - curl -fsSL https://tailscale.com/install.sh | sh
   - tailscale up --auth-key='${tailscale_auth_key}' --hostname='${hostname}'
+  - tailscale set --ssh

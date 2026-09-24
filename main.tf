@@ -35,10 +35,10 @@ data "hcloud_image" "node" {
 
 resource "tailscale_tailnet_key" "node" {
   count         = var.node_count
-  reusable      = false
+  reusable      = true
   ephemeral     = true
   preauthorized = true
-  expiry        = 3600
+  recreate_if_invalid = "always"
   tags = [
     var.tailscale_tag
   ]

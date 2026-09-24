@@ -19,4 +19,20 @@ resource "hcloud_server" "this" {
       tailscale_auth_key = var.tailscale_auth_key
     }
   )
+
+  shutdown_before_deletion = true
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+
+    command = <<-EOT
+      ssh \
+        -o BatchMode=yes \
+        -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        root@${self.name} \
+        'tailscale logout'
+    EOT
+  }
 }
