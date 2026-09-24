@@ -283,3 +283,7 @@ If destroy fails partway through, restore valid provider credentials and run ter
 - Terraform cannot directly verify or immediately delete the Tailscale device created by a node.
 - Partial server replacement requires replacing its single-use Tailscale key as well.
 - There is no automated CI/CD workflow by design; checks are run manually.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
