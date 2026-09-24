@@ -90,3 +90,11 @@ variable "public_ipv4_enabled" {
   default     = true
   nullable    = false
 }
+
+
+variable "manage_known_hosts" {
+  description = "Whether a known_hosts_file should be generated automatically"
+  type = bool
+  default = false
+  nullable = false
+}

@@ -9,3 +9,4 @@ node_location       = "nbg1"
 node_name_prefix    = "k8s-lab-node"
 tailscale_tag       = "tag:k8s-node"
 public_ipv4_enabled = true
+manage_known_hosts = false
