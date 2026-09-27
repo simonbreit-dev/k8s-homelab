@@ -1,6 +1,6 @@
 # Disposable Kubernetes Lab on Hetzner Cloud
 
-Terraform configuration for disposable Hetzner Cloud nodes connected through Tailscale. The repository currently provisions the infrastructure foundation; it does not install Kubernetes.
+Infrastructure code for disposable Hetzner Cloud nodes connected through Tailscale. Terraform provisions the infrastructure foundation. The Ansible directory is a minimal scaffold for later node configuration; it does not install Kubernetes.
 
 ## What it creates
 
@@ -15,33 +15,46 @@ Terraform configuration for disposable Hetzner Cloud nodes connected through Tai
 
 ```text
 .
-├── backend.tf                    # HCP Terraform cloud configuration
-├── terraform.tf                  # Terraform and provider requirements
-├── providers.tf                  # Provider configuration
-├── main.tf                       # Shared infrastructure and node module calls
-├── known_hosts.tf                # Optional local known-hosts management
-├── variables.tf                  # Root input variables
-├── config.auto.tfvars.example    # Non-secret example configuration
-├── .terraform.lock.hcl           # Locked provider selections
-├── .terraformignore              # HCP configuration-upload exclusions
+├── ansible/
+│   ├── ansible.cfg
+│   ├── inventory/
+│   │   └── hosts.yml             # Empty k8s_nodes inventory
+│   ├── playbooks/
+│   │   └── site.yml              # Connectivity check
+│   └── roles/
+│       └── README.md
+├── terraform/
+│   ├── backend.tf                # HCP Terraform cloud configuration
+│   ├── terraform.tf              # Terraform and provider requirements
+│   ├── providers.tf              # Provider configuration
+│   ├── main.tf                   # Shared infrastructure and node module calls
+│   ├── known_hosts.tf            # Optional local known-hosts management
+│   ├── variables.tf              # Root input variables
+│   ├── config.auto.tfvars.example
+│   ├── .terraform.lock.hcl
+│   ├── .terraformignore          # HCP configuration-upload exclusions
+│   ├── scripts/
+│   │   └── update-known-host.sh
+│   └── modules/
+│       └── node/
+│           ├── terraform.tf
+│           ├── main.tf
+│           ├── variables.tf
+│           ├── outputs.tf
+│           └── templates/
+│               └── cloud-init.yml
+├── .envrc
+├── .gitignore
 ├── LICENSE
-├── scripts/
-│   └── update-known-host.sh
-└── modules/
-    └── node/
-        ├── terraform.tf
-        ├── main.tf
-        ├── variables.tf
-        ├── outputs.tf
-        └── templates/
-            └── cloud-init.yml
+└── README.md
 ```
 
-`modules/node` is an internal module that owns one server and its bootstrap lifecycle.
+`terraform/modules/node` is an internal module that owns one server and its bootstrap lifecycle. Root-level files are shared repository configuration and documentation.
 
 ## Prerequisites
 
 - Terraform 1.16.4.
+- Ansible Core for the optional connectivity playbook.
 - A Hetzner Cloud project and API token.
 - A Tailscale OAuth client with the `auth_keys` scope and permission to assign `tag:k8s-node` or the configured replacement.
 - A tailnet policy that permits the required access to that tag.
@@ -63,7 +76,7 @@ Keep them out of Terraform variables and tfvars files.
 Authenticate the CLI and select the workspace externally:
 
 ```shell
-terraform login
+terraform -chdir=terraform login
 export TF_CLOUD_ORGANIZATION="your-organization"
 export TF_WORKSPACE="your-workspace"
 ```
@@ -87,7 +100,7 @@ Run `direnv allow` after creating the file.
 Copy the example for local execution:
 
 ```shell
-cp config.auto.tfvars.example config.auto.tfvars
+cp terraform/config.auto.tfvars.example terraform/config.auto.tfvars
 ```
 
 Only `ssh_public_key` is required. Project defaults are:
@@ -108,11 +121,11 @@ Only `ssh_public_key` is required. Project defaults are:
 ## Workflow
 
 ```shell
-terraform init
-terraform fmt -check -recursive
-terraform validate
-terraform plan
-terraform apply
+terraform -chdir=terraform init
+terraform -chdir=terraform fmt -check -recursive
+terraform -chdir=terraform validate
+terraform -chdir=terraform plan
+terraform -chdir=terraform apply
 ```
 
 With the `cloud` block, plan and apply use the selected HCP workspace unless that workspace is configured for local execution.
@@ -140,7 +153,7 @@ Public SSH is blocked by the Hetzner firewall. Connect through Tailscale MagicDN
 ssh root@k8s-lab-node-1
 ```
 
-When `manage_known_hosts = true`, Terraform runs `scripts/update-known-host.sh` after creating each node and writes scanned keys to `~/.ssh/known_hosts_k8s_lab` in the environment running Terraform. Use that file explicitly:
+When `manage_known_hosts = true`, Terraform runs `terraform/scripts/update-known-host.sh` after creating each node and writes scanned keys to `~/.ssh/known_hosts_k8s_lab` in the environment running Terraform. Use that file explicitly:
 
 ```shell
 ssh -o UserKnownHostsFile="$HOME/.ssh/known_hosts_k8s_lab" root@k8s-lab-node-1
@@ -151,16 +164,29 @@ This option is intended for local execution. An HCP remote worker cannot populat
 ## Destroy and cleanup
 
 ```shell
-terraform destroy
+terraform -chdir=terraform destroy
 ```
 
 Before deleting a server, Terraform makes a best-effort SSH call to `tailscale logout`; failure does not block destruction. Registered Tailscale devices are cloud-init side effects rather than Terraform resources, so verify the Tailscale admin console after destroy and remove stale devices if necessary.
 
 The authentication keys are reusable, preauthorized, and recreated when invalid. They use the provider's 90-day default expiry. Nodes registered with them are ephemeral.
 
+## Ansible
+
+The Ansible inventory starts empty to avoid targeting infrastructure accidentally. After the nodes are reachable through Tailscale, add them beneath `k8s_nodes` in `ansible/inventory/hosts.yml`, then run:
+
+```shell
+cd ansible
+ansible-playbook --syntax-check playbooks/site.yml
+ansible-playbook playbooks/site.yml
+```
+
+The initial playbook only checks connectivity. Add configuration in `ansible/roles` and reference those roles from `ansible/playbooks/site.yml`.
+
 ## Limitations
 
 - Kubernetes installation and cluster bootstrapping are not implemented.
+- The Ansible scaffold contains no node-configuration roles yet.
 - Cloud-init is asynchronous initialization, not ongoing configuration management.
 - The Tailscale installer is downloaded and executed at boot without a pinned version.
 - Private-network ranges and shared resource names are project conventions.
