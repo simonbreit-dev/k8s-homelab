@@ -1,0 +1,9 @@
+---
+- name: Verify Kubernetes nodes are reachable
+  hosts: k8s_nodes
+  gather_facts: false
+
+  tasks:
+    - name: Check Ansible connectivity
+      ansible.builtin.ping:
+
