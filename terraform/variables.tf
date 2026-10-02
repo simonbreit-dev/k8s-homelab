@@ -1,19 +1,24 @@
-variable "manage_known_hosts" {
-  type        = bool
-  description = "Whether Terraform should populate a dedicated local known-hosts file after creating nodes."
-  default     = false
+variable "control_plane_count" {
+  type        = number
+  description = "Number of control-plane nodes. This lab supports exactly one control plane and at least one worker."
+  default     = 1
   nullable    = false
+
+  validation {
+    condition     = var.control_plane_count == 1 && var.control_plane_count < var.node_count
+    error_message = "control_plane_count must be 1, with at least one additional worker in node_count."
+  }
 }
 
 variable "node_count" {
   type        = number
-  description = "Number of lab nodes to create. Destroy the lab instead of setting this to zero."
+  description = "Total number of lab nodes, including one control plane and at least one worker. Destroy the lab instead of setting this to zero."
   default     = 3
   nullable    = false
 
   validation {
-    condition     = var.node_count >= 1 && var.node_count <= 10 && floor(var.node_count) == var.node_count
-    error_message = "node_count must be a whole number between 1 and 10."
+    condition     = var.node_count >= 2 && var.node_count <= 10 && floor(var.node_count) == var.node_count
+    error_message = "node_count must be a whole number between 2 and 10."
   }
 }
 
@@ -66,13 +71,6 @@ variable "node_server_type" {
     condition     = length(trimspace(var.node_server_type)) > 0
     error_message = "node_server_type must not be empty."
   }
-}
-
-variable "public_ipv4_enabled" {
-  type        = bool
-  description = "Whether each lab node receives a public IPv4 address in addition to its public IPv6 address."
-  default     = true
-  nullable    = false
 }
 
 variable "ssh_public_key" {

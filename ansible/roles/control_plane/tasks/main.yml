@@ -1,0 +1,103 @@
+---
+- name: Check whether Kubernetes control plane is initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: control_plane_admin_conf
+
+- name: Verify Kubernetes node IP
+  ansible.builtin.assert:
+    that:
+      - k8s_node_ip is defined
+      - k8s_node_ip | length > 0
+      - k8s_node_ip_candidates | length == 1
+    fail_msg: >-
+      Could not determine exactly one Kubernetes node IP
+      inside {{ kubernetes_node_network }}
+      on {{ inventory_hostname }}.
+
+- name: Read installed kubeadm version
+  ansible.builtin.command:
+    cmd: kubeadm version -o short
+  register: control_plane_kubeadm_version
+  changed_when: false
+  when: not control_plane_admin_conf.stat.exists
+
+- name: Verify installed kubeadm version
+  ansible.builtin.assert:
+    that:
+      - control_plane_kubeadm_version.stdout | trim | length > 0
+      - control_plane_kubeadm_version.stdout | trim is match('^v[0-9]+\.[0-9]+\.[0-9]+')
+    fail_msg: >-
+      Could not determine installed kubeadm version
+      on {{ inventory_hostname }}.
+  when: not control_plane_admin_conf.stat.exists
+
+- name: Deploy kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yml.j2
+    dest: /etc/kubernetes/kubeadm-config.yml
+    owner: root
+    group: root
+    mode: "0600"
+  when: not control_plane_admin_conf.stat.exists
+
+- name: Initialize Kubernetes control plane
+  ansible.builtin.command:
+    cmd: kubeadm init --config /etc/kubernetes/kubeadm-config.yml
+    creates: /etc/kubernetes/admin.conf
+  when: not control_plane_admin_conf.stat.exists
+
+- name: Create root kubeconfig directory
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install root kubeconfig
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Create local kubeconfig directory
+  ansible.builtin.file:
+    path: "{{ kubeconfig_local_path | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Fetch admin kubeconfig to Ansible controller
+  ansible.builtin.fetch:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ kubeconfig_local_path }}"
+    flat: true
+  run_once: true
+
+- name: Configure local kubeconfig API endpoint
+  ansible.builtin.command:
+    cmd: >-
+      kubectl config set-cluster kubernetes
+      --server=https://{{ inventory_hostname }}:6443
+      --kubeconfig={{ kubeconfig_local_path }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+
+- name: Verify local Kubernetes API access
+  ansible.builtin.command:
+    cmd: >-
+      kubectl
+      --kubeconfig={{ kubeconfig_local_path }}
+      get --raw=/version
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false

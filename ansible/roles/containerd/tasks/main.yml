@@ -1,0 +1,83 @@
+---
+- name: Create APT keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Docker repository signing key
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure Docker APT repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types:
+      - deb
+    uris:
+      - "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}"
+    suites:
+      - "{{ ansible_facts.distribution_release }}"
+    components:
+      - stable
+    signed_by: /etc/apt/keyrings/docker.asc
+    state: present
+
+- name: Update APT cache
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install containerd
+  ansible.builtin.apt:
+    name: containerd.io
+    state: present
+
+- name: Create containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Generate default containerd configuration
+  ansible.builtin.command:
+    cmd: containerd config default
+  register: containerd_default_config
+  changed_when: false
+
+- name: Build Kubernetes containerd configuration
+  ansible.builtin.set_fact:
+    containerd_config: >-
+      {{
+        containerd_default_config.stdout
+        | regex_replace(
+            'SystemdCgroup = false',
+            'SystemdCgroup = true'
+          )
+      }}
+
+- name: Deploy validated containerd configuration
+  ansible.builtin.copy:
+    content: "{{ containerd_config }}"
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+    validate: containerd --config %s config dump
+  notify: Restart containerd
+
+- name: Ensure containerd is enabled and running
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    state: started
+
+- name: Apply containerd configuration changes
+  ansible.builtin.meta: flush_handlers

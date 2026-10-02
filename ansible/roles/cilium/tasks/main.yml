@@ -1,0 +1,57 @@
+---
+- name: Install Cilium
+  kubernetes.core.helm:
+    release_name: cilium
+    chart_ref: "oci://quay.io/cilium/charts/cilium"
+    chart_version: "{{ cilium_version }}"
+    release_namespace: kube-system
+    kubeconfig: "{{ kubeconfig_local_path }}"
+
+    release_values:
+      ipam:
+        mode: kubernetes
+
+      kubeProxyReplacement: false
+
+      routingMode: tunnel
+      tunnelProtocol: vxlan
+
+      operator:
+        replicas: 1
+
+    reset_values: true
+    wait: true
+    atomic: true
+    timeout: 10m0s
+
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Wait for all Kubernetes nodes to become Ready
+  ansible.builtin.command:
+    cmd: >-
+      kubectl
+      --kubeconfig={{ kubeconfig_local_path }}
+      wait
+      --for=condition=Ready
+      node
+      --all
+      --timeout=300s
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+
+- name: Wait for CoreDNS
+  ansible.builtin.command:
+    cmd: >-
+      kubectl
+      --kubeconfig={{ kubeconfig_local_path }}
+      -n kube-system
+      rollout status deployment/coredns
+      --timeout=300s
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false

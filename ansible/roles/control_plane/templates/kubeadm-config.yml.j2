@@ -1,0 +1,31 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+
+localAPIEndpoint:
+  advertiseAddress: "{{ k8s_node_ip }}"
+  bindPort: 6443
+
+nodeRegistration:
+  name: "{{ inventory_hostname }}"
+  criSocket: "unix:///var/run/containerd/containerd.sock"
+
+  kubeletExtraArgs:
+    - name: node-ip
+      value: "{{ k8s_node_ip }}"
+
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+
+kubernetesVersion: "{{ control_plane_kubeadm_version.stdout | trim }}"
+
+controlPlaneEndpoint: "{{ k8s_node_ip }}:6443"
+
+networking:
+  podSubnet: "{{ kubernetes_pod_cidr }}"
+  serviceSubnet: "{{ kubernetes_service_cidr }}"
+
+apiServer:
+  certSANs:
+    - "{{ inventory_hostname }}"

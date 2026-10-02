@@ -1,9 +1,106 @@
 ---
-- name: Verify Kubernetes nodes are reachable
+- name: Prepare Kubernetes nodes
   hosts: k8s_nodes
-  gather_facts: false
+  become: true
+  gather_facts: true
+
+  roles:
+    - common
+    - containerd
+    - kubernetes
+
+- name: Verify Kubernetes private network
+  hosts: k8s_nodes
+  become: true
+  gather_facts: true
 
   tasks:
-    - name: Check Ansible connectivity
-      ansible.builtin.ping:
+    - name: Check connectivity to all other Kubernetes nodes
+      ansible.builtin.command:
+        argv:
+          - ping
+          - -c
+          - "1"
+          - -W
+          - "2"
+          - "{{ hostvars[item].k8s_node_ip }}"
+      loop: "{{ groups['k8s_nodes'] | difference([inventory_hostname]) }}"
+      changed_when: false
 
+- name: Initialize Kubernetes control plane
+  hosts: control_plane
+  become: true
+  gather_facts: true
+  roles:
+    - control_plane
+
+- name: Inspect Kubernetes workers
+  hosts: workers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Check whether worker is already joined
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: worker_kubelet_conf
+
+- name: Prepare worker bootstrap credentials
+  hosts: control_plane
+  become: true
+  gather_facts: false
+
+  vars:
+    workers_need_join: >-
+      {{
+        groups['workers']
+        | map('extract', hostvars, 'worker_kubelet_conf')
+        | selectattr('stat.exists', 'equalto', false)
+        | list
+        | length > 0
+      }}
+
+  tasks:
+    - name: Create temporary Kubernetes bootstrap token
+      ansible.builtin.command:
+        cmd: kubeadm token create --ttl 30m
+      register: kubeadm_worker_token
+      when: workers_need_join
+      changed_when: true
+      no_log: true
+
+    - name: Calculate Kubernetes CA certificate hash
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          openssl x509 \
+            -pubkey \
+            -in /etc/kubernetes/pki/ca.crt \
+            | openssl pkey -pubin -outform der \
+            | openssl dgst -sha256 -hex \
+            | awk '{print $2}'
+        executable: /bin/bash
+      register: kubeadm_ca_hash
+      changed_when: false
+      when: workers_need_join
+
+    - name: Store temporary worker bootstrap credentials
+      ansible.builtin.set_fact:
+        kubernetes_join_token: "{{ kubeadm_worker_token.stdout | trim }}"
+        kubernetes_ca_hash: "{{ kubeadm_ca_hash.stdout | trim }}"
+      when: workers_need_join
+      no_log: true
+
+- name: Join Kubernetes workers
+  hosts: workers
+  become: true
+  gather_facts: true
+  roles:
+    - worker
+
+- name: Install Kubernetes pod network
+  hosts: control_plane
+  become: true
+  gather_facts: true
+  roles:
+    - cilium

@@ -18,14 +18,9 @@ variable "name" {
   description = "RFC 1123 hostname to assign to the Hetzner Cloud server and cloud-init configuration."
 }
 
-variable "network_id" {
-  type        = number
-  description = "Hetzner Cloud private network ID attached to the node."
-}
-
-variable "public_ipv4_enabled" {
-  type        = bool
-  description = "Whether the node receives a public IPv4 address."
+variable "private_ip" {
+  type        = string
+  description = "IPv4 address assigned to the node inside the Hetzner Cloud subnet."
 }
 
 variable "server_type" {
@@ -36,6 +31,11 @@ variable "server_type" {
 variable "ssh_key_id" {
   type        = string
   description = "ID of the Terraform-managed Hetzner Cloud SSH key installed on the node."
+}
+
+variable "subnet_id" {
+  type        = string
+  description = "Hetzner Cloud subnet ID to which the node's private network interface is attached."
 }
 
 variable "tailscale_auth_key" {

@@ -1,0 +1,109 @@
+---
+- name: Verify exactly one Kubernetes private node IP exists
+  ansible.builtin.assert:
+    that:
+      - k8s_node_ip_candidates | length == 1
+    fail_msg: >-
+      Expected exactly one IPv4 address inside
+      {{ kubernetes_node_network }} on {{ inventory_hostname }},
+      found: {{ k8s_node_ip_candidates }}
+
+- name: Verify IPv4 default route exists
+  ansible.builtin.command:
+    cmd: ip -4 route show default
+  register: kubernetes_ipv4_default_route
+  changed_when: false
+  failed_when: kubernetes_ipv4_default_route.stdout | trim == ""
+
+- name: Disable swap immediately
+  ansible.builtin.command:
+    cmd: swapoff -a
+  when: ansible_facts.swaptotal_mb | int > 0
+  changed_when: true
+
+- name: Disable swap permanently in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#\n]+\s+\S+\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Configure Kubernetes sysctl settings
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      net.ipv4.ip_forward = 1
+
+- name: Apply Kubernetes sysctl settings
+  ansible.builtin.command:
+    cmd: sysctl -p /etc/sysctl.d/99-kubernetes.conf
+  changed_when: false
+
+- name: Read IPv4 forwarding state
+  ansible.builtin.command:
+    cmd: sysctl -n net.ipv4.ip_forward
+  register: kubernetes_ipv4_forwarding
+  changed_when: false
+
+- name: Verify IPv4 forwarding is enabled
+  ansible.builtin.assert:
+    that:
+      - kubernetes_ipv4_forwarding.stdout | trim == "1"
+    fail_msg: >-
+      net.ipv4.ip_forward is not enabled on {{ inventory_hostname }}.
+
+- name: Create APT keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Kubernetes repository signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_repo_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure Kubernetes APT repository
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types:
+      - deb
+    uris:
+      - "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_repo_version }}/deb/"
+    suites:
+      - "/"
+    signed_by: /etc/apt/keyrings/kubernetes.asc
+    state: present
+
+- name: Update APT cache
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Kubernetes packages
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+
+- name: Hold Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+
+- name: Ensure kubelet is enabled
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true

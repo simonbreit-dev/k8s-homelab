@@ -142,3 +142,10 @@ Thumbs.db
 
 # Local review reports
 .reports/
+
+# Generated inventory and local Python tooling
+/ansible/inventory/hosts.yml
+.venv/
+__pycache__/
+*.pyc
+terraform.tfstate.d/

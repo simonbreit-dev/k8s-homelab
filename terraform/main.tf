@@ -49,16 +49,18 @@ resource "hcloud_network_subnet" "lab" {
 }
 
 module "nodes" {
-  source = "./modules/node"
-  count  = var.node_count
-
-  name                = "${var.node_name_prefix}-${count.index + 1}"
-  server_type         = data.hcloud_server_type.node.name
-  image               = tostring(data.hcloud_image.node.id)
-  location            = var.node_location
-  public_ipv4_enabled = var.public_ipv4_enabled
-  ssh_key_id          = hcloud_ssh_key.node_access.id
-  firewall_ids        = [hcloud_firewall.lab.id]
-  network_id          = hcloud_network.lab.id
-  tailscale_auth_key  = tailscale_tailnet_key.node[count.index].key
+  source       = "./modules/node"
+  count        = var.node_count
+  name         = "${var.node_name_prefix}-${count.index + 1}"
+  server_type  = data.hcloud_server_type.node.name
+  image        = tostring(data.hcloud_image.node.id)
+  location     = var.node_location
+  ssh_key_id   = hcloud_ssh_key.node_access.id
+  firewall_ids = [hcloud_firewall.lab.id]
+  subnet_id    = hcloud_network_subnet.lab.id
+  private_ip = cidrhost(
+    hcloud_network_subnet.lab.ip_range,
+    count.index + 11
+  )
+  tailscale_auth_key = tailscale_tailnet_key.node[count.index].key
 }

@@ -7,6 +7,11 @@ terraform {
       version = "1.69.0"
     }
 
+    local = {
+      source  = "hashicorp/local"
+      version = "2.9.1"
+    }
+
     tailscale = {
       source  = "tailscale/tailscale"
       version = "0.29.2"

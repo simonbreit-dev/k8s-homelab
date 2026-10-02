@@ -1,0 +1,10 @@
+---
+- name: Install common packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - openssl
+      - python3-debian
+    state: present
+    update_cache: true

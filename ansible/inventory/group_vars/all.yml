@@ -1,0 +1,25 @@
+---
+# Hetzner private node network
+kubernetes_node_network: "10.0.1.0/24"
+
+# Kubernetes networking
+kubernetes_pod_cidr: "10.244.0.0/16"
+kubernetes_service_cidr: "10.96.0.0/12"
+
+# Kubernetes package repository: latest patch of this minor
+kubernetes_repo_version: "v1.34"
+
+# Cilium
+cilium_version: "1.20.2"
+
+# Local admin kubeconfig on the Ansible controller
+kubeconfig_local_path: "{{ lookup('env', 'HOME') }}/.kube/k8s-lab-admin.conf"
+
+# Automatically derive the node's Kubernetes IPv4 address
+k8s_node_ip_candidates: >-
+  {{
+    ansible_facts.all_ipv4_addresses
+    | ansible.utils.ipaddr(kubernetes_node_network)
+  }}
+
+k8s_node_ip: "{{ k8s_node_ip_candidates | first }}"
