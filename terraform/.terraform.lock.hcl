@@ -23,7 +23,7 @@ provider "registry.terraform.io/hashicorp/local" {
 
 provider "registry.terraform.io/hetznercloud/hcloud" {
   version     = "1.69.0"
-  constraints = "1.69.0"
+  constraints = ">= 1.69.0, 1.69.0"
   hashes = [
     "h1:PWhmd5g+OPBPdwQoFkG+KFmppYSR6ujPof+zwCjfMPI=",
     "zh:023c0580c46b48a1dce8aeb5832ec9896ce53ee019a2b296d854873f92aad7d9",

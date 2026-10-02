@@ -1,0 +1,58 @@
+---
+- name: Remove the Terraform-managed Tailscale device
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    tailscale_api_url: "{{ tailscale_api_base_url | default('https://api.tailscale.com') }}"
+  tasks:
+    - name: Require an exact device ID and local OAuth credentials
+      ansible.builtin.assert:
+        that:
+          - tailscale_device_id is defined
+          - tailscale_device_id is match('^[A-Za-z0-9_-]+$')
+          - lookup('ansible.builtin.env', 'TAILSCALE_OAUTH_CLIENT_ID') | length > 0
+          - lookup('ansible.builtin.env', 'TAILSCALE_OAUTH_CLIENT_SECRET') | length > 0
+        fail_msg: "Device cleanup requires the recorded device ID and local Tailscale OAuth credentials."
+
+    - name: Obtain a device-management token
+      ansible.builtin.uri:
+        url: "{{ tailscale_api_url }}/api/v2/oauth/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: client_credentials
+          client_id: "{{ lookup('ansible.builtin.env', 'TAILSCALE_OAUTH_CLIENT_ID') }}"
+          client_secret: "{{ lookup('ansible.builtin.env', 'TAILSCALE_OAUTH_CLIENT_SECRET') }}"
+          scope: "devices:core"
+        follow_redirects: none
+      register: tailscale_token
+      no_log: true
+      changed_when: false
+      failed_when: false
+
+    - name: Verify device-management authorization
+      ansible.builtin.assert:
+        that:
+          - tailscale_token.status | default(-1) == 200
+          - tailscale_token.json.access_token is defined
+        fail_msg: "Tailscale OAuth failed (HTTP {{ tailscale_token.status | default(-1) }}). The client needs devices:core Write for the node tag."
+
+    - name: Delete the recorded device
+      ansible.builtin.uri:
+        url: "{{ tailscale_api_url }}/api/v2/device/{{ tailscale_device_id | urlencode }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ tailscale_token.json.access_token }}"
+        status_code: [200, 204, 404]
+        follow_redirects: none
+      register: tailscale_deletion
+      no_log: true
+      failed_when: false
+      changed_when: tailscale_deletion.status | default(-1) in [200, 204]
+
+    - name: Require successful cleanup before server deletion
+      ansible.builtin.assert:
+        that:
+          - tailscale_deletion.status | default(-1) in [200, 204, 404]
+        fail_msg: "Tailscale device cleanup failed (HTTP {{ tailscale_deletion.status | default(-1) }}). Terraform must retain the server until cleanup succeeds."

@@ -2,10 +2,11 @@
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIReplaceMe user@example"
 
 # Optional overrides; the values shown here are the project defaults.
-control_plane_count = 1
-node_count          = 3
-node_image          = "ubuntu-24.04"
-node_location       = "nbg1"
-node_name_prefix    = "k8s-lab-node"
-node_server_type    = "cx23"
-tailscale_tag       = "tag:k8s-node"
+control_plane_count       = 1
+node_count                = 3
+node_image_id             = 161547269
+node_location             = "nbg1"
+node_name_prefix          = "k8s-lab-node"
+node_server_type          = "cx23"
+tailscale_package_version = "1.102.4"
+tailscale_tag             = "tag:k8s-node"

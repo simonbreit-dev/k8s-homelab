@@ -4,16 +4,48 @@
     path: /etc/kubernetes/admin.conf
   register: control_plane_admin_conf
 
-- name: Verify Kubernetes node IP
+- name: Inspect artifacts from incomplete control-plane bootstrap
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/kubernetes/pki/ca.crt
+    - /etc/kubernetes/manifests/kube-apiserver.yaml
+    - /var/lib/etcd/member
+  register: control_plane_bootstrap_artifacts
+  when: not control_plane_admin_conf.stat.exists
+
+- name: Reject incomplete control-plane initialization
   ansible.builtin.assert:
     that:
-      - k8s_node_ip is defined
-      - k8s_node_ip | length > 0
-      - k8s_node_ip_candidates | length == 1
+      - control_plane_bootstrap_artifacts.results | selectattr('stat.exists') | list | length == 0
     fail_msg: >-
-      Could not determine exactly one Kubernetes node IP
-      inside {{ kubernetes_node_network }}
-      on {{ inventory_hostname }}.
+      Control-plane artifacts exist without admin.conf. Inspect the failed kubeadm
+      initialization; bootstrap will not reset or overwrite
+      this partial cluster automatically.
+  when: not control_plane_admin_conf.stat.exists
+
+- name: Inspect an existing control-plane API
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --request-timeout=15s
+      - get
+      - --raw=/readyz
+  register: control_plane_existing_api
+  changed_when: false
+  failed_when: false
+  when: control_plane_admin_conf.stat.exists
+
+- name: Verify existing control plane is healthy before continuing
+  ansible.builtin.assert:
+    that:
+      - control_plane_existing_api.rc == 0
+    fail_msg: >-
+      admin.conf exists but the control-plane API is not ready. Inspect kubelet,
+      containerd and control-plane Pods. Bootstrap will not run
+      another kubeadm init or automatically reset the cluster.
+  when: control_plane_admin_conf.stat.exists
 
 - name: Read installed kubeadm version
   ansible.builtin.command:
@@ -22,14 +54,11 @@
   changed_when: false
   when: not control_plane_admin_conf.stat.exists
 
-- name: Verify installed kubeadm version
+- name: Verify installed kubeadm version matches the pinned baseline
   ansible.builtin.assert:
     that:
-      - control_plane_kubeadm_version.stdout | trim | length > 0
-      - control_plane_kubeadm_version.stdout | trim is match('^v[0-9]+\.[0-9]+\.[0-9]+')
-    fail_msg: >-
-      Could not determine installed kubeadm version
-      on {{ inventory_hostname }}.
+      - control_plane_kubeadm_version.stdout | trim == 'v' + kubernetes_package_version.split('-')[0]
+    fail_msg: Installed kubeadm does not match the configured bootstrap package version.
   when: not control_plane_admin_conf.stat.exists
 
 - name: Deploy kubeadm configuration
@@ -63,6 +92,34 @@
     owner: root
     group: root
     mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Read admin kubeconfig
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/admin.conf
+  register: control_plane_admin_config
+  no_log: true
+
+- name: Decode admin kubeconfig
+  ansible.builtin.set_fact:
+    control_plane_source_config: "{{ control_plane_admin_config.content | b64decode | from_yaml }}"
+  no_log: true
+
+- name: Verify kubeadm kubeconfig structure
+  ansible.builtin.assert:
+    that:
+      - control_plane_source_config.clusters | selectattr('name', 'equalto', 'kubernetes') | list | length == 1
+    fail_msg: Expected the Kubernetes cluster in kubeadm admin.conf; inspect the configuration manually.
+  no_log: true
+
+- name: Store current cluster certificate authority
+  ansible.builtin.set_fact:
+    control_plane_ca_data: >-
+      {{ (control_plane_source_config.clusters
+          | selectattr('name', 'equalto', 'kubernetes')
+          | map(attribute='cluster') | first)['certificate-authority-data'] }}
+  no_log: true
 
 - name: Create local kubeconfig directory
   ansible.builtin.file:
@@ -71,33 +128,25 @@
     mode: "0700"
   delegate_to: localhost
   become: false
-  run_once: true
 
-- name: Fetch admin kubeconfig to Ansible controller
-  ansible.builtin.fetch:
-    src: /etc/kubernetes/admin.conf
+- name: Write local kubeconfig with the Tailscale API endpoint
+  ansible.builtin.template:
+    src: kubeconfig.yml.j2
     dest: "{{ kubeconfig_local_path }}"
-    flat: true
-  run_once: true
-
-- name: Configure local kubeconfig API endpoint
-  ansible.builtin.command:
-    cmd: >-
-      kubectl config set-cluster kubernetes
-      --server=https://{{ inventory_hostname }}:6443
-      --kubeconfig={{ kubeconfig_local_path }}
+    mode: "0600"
   delegate_to: localhost
   become: false
-  run_once: true
-  changed_when: false
+  no_log: true
+  diff: false
 
 - name: Verify local Kubernetes API access
   ansible.builtin.command:
-    cmd: >-
-      kubectl
-      --kubeconfig={{ kubeconfig_local_path }}
-      get --raw=/version
+    argv:
+      - kubectl
+      - "--kubeconfig={{ kubeconfig_local_path }}"
+      - --request-timeout=15s
+      - get
+      - --raw=/readyz
   delegate_to: localhost
   become: false
-  run_once: true
   changed_when: false

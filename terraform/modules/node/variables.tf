@@ -43,3 +43,8 @@ variable "tailscale_auth_key" {
   description = "Tailscale authentication key consumed by cloud-init when the node first boots."
   sensitive   = true
 }
+
+variable "tailscale_package_version" {
+  type        = string
+  description = "Exact stable Tailscale APT package version installed during node bootstrap."
+}

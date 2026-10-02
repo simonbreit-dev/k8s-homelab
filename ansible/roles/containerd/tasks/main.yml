@@ -28,14 +28,16 @@
       - stable
     signed_by: /etc/apt/keyrings/docker.asc
     state: present
+  register: containerd_repository
 
 - name: Update APT cache
   ansible.builtin.apt:
     update_cache: true
+    cache_valid_time: "{{ 0 if containerd_repository.changed else apt_cache_valid_time }}"
 
 - name: Install containerd
   ansible.builtin.apt:
-    name: containerd.io
+    name: "containerd.io={{ containerd_package_version }}"
     state: present
 
 - name: Create containerd configuration directory
@@ -46,26 +48,9 @@
     group: root
     mode: "0755"
 
-- name: Generate default containerd configuration
-  ansible.builtin.command:
-    cmd: containerd config default
-  register: containerd_default_config
-  changed_when: false
-
-- name: Build Kubernetes containerd configuration
-  ansible.builtin.set_fact:
-    containerd_config: >-
-      {{
-        containerd_default_config.stdout
-        | regex_replace(
-            'SystemdCgroup = false',
-            'SystemdCgroup = true'
-          )
-      }}
-
 - name: Deploy validated containerd configuration
-  ansible.builtin.copy:
-    content: "{{ containerd_config }}"
+  ansible.builtin.template:
+    src: config.toml.j2
     dest: /etc/containerd/config.toml
     owner: root
     group: root
@@ -81,3 +66,44 @@
 
 - name: Apply containerd configuration changes
   ansible.builtin.meta: flush_handlers
+
+- name: Read effective containerd configuration
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json, subprocess, tomllib
+        config = tomllib.loads(subprocess.check_output(
+            ["containerd", "--config", "/etc/containerd/config.toml", "config", "dump"], text=True))
+        runtime = config["plugins"]["io.containerd.cri.v1.runtime"]["containerd"]["runtimes"]["runc"]
+        print(json.dumps({"version": config["version"],
+                          "disabled_plugins": config.get("disabled_plugins", []),
+                          "runtime_type": runtime["runtime_type"],
+                          "systemd_cgroup": runtime["options"]["SystemdCgroup"]}))
+  register: containerd_effective_config
+  changed_when: false
+
+- name: Verify runtime configuration semantics
+  ansible.builtin.assert:
+    that:
+      - containerd_settings.version == 4
+      - containerd_settings.disabled_plugins | length == 0
+      - containerd_settings.runtime_type == 'io.containerd.runc.v2'
+      - containerd_settings.systemd_cgroup
+    fail_msg: The managed containerd runtime must enable CRI and the systemd cgroup driver.
+  vars:
+    containerd_settings: "{{ containerd_effective_config.stdout | from_json }}"
+
+- name: Read running containerd CRI plugins
+  ansible.builtin.command:
+    argv: [ctr, --address, /run/containerd/containerd.sock, plugins, ls, 'type==io.containerd.cri.v1']
+  register: containerd_cri_plugins
+  changed_when: false
+
+- name: Verify running CRI plugins are healthy
+  ansible.builtin.assert:
+    that:
+      - containerd_cri_plugins.stdout is search('io.containerd.cri.v1\s+runtime\s+.*\s+ok')
+      - containerd_cri_plugins.stdout is search('io.containerd.cri.v1\s+images\s+.*\s+ok')
+    fail_msg: Inspect journalctl -u containerd; the CRI runtime and image plugins must both be healthy.

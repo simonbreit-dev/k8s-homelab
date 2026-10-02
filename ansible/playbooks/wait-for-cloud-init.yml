@@ -1,0 +1,7 @@
+---
+- name: Wait for server initialization before attaching the private network
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for successful server initialization
+      ansible.builtin.import_tasks: ../tasks/wait-for-cloud-init.yml

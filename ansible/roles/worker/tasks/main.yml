@@ -4,6 +4,44 @@
     path: /etc/kubernetes/kubelet.conf
   register: worker_kubelet_conf
 
+- name: Read existing worker kubeconfig
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/kubelet.conf
+  register: worker_existing_config
+  when: worker_kubelet_conf.stat.exists
+  no_log: true
+
+- name: Decode existing worker kubeconfig
+  ansible.builtin.set_fact:
+    worker_source_config: "{{ worker_existing_config.content | b64decode | from_yaml }}"
+  when: worker_kubelet_conf.stat.exists
+  no_log: true
+
+- name: Read existing worker certificate authority
+  ansible.builtin.set_fact:
+    worker_ca_data: "{{ worker_cluster.get('certificate-authority-data', '') }}"
+  vars:
+    worker_context: >-
+      {{ worker_source_config.contexts
+          | selectattr('name', 'equalto', worker_source_config['current-context'])
+          | map(attribute='context') | first | default({}) }}
+    worker_cluster: >-
+      {{ worker_source_config.clusters
+          | selectattr('name', 'equalto', worker_context.get('cluster', ''))
+          | map(attribute='cluster') | first | default({}) }}
+  when: worker_kubelet_conf.stat.exists
+  no_log: true
+
+- name: Verify worker trusts the current cluster identity
+  ansible.builtin.assert:
+    that:
+      - worker_ca_data == hostvars[groups['control_plane'][0]].control_plane_ca_data
+    fail_msg: >-
+      This worker trusts a different or unrecognized cluster CA. A recreated
+      control plane is a new cluster. Bootstrap will not reset
+      or rejoin a retained worker automatically.
+  when: worker_kubelet_conf.stat.exists
+
 - name: Join worker to Kubernetes cluster
   when: not worker_kubelet_conf.stat.exists
   block:
@@ -15,6 +53,8 @@
         owner: root
         group: root
         mode: "0600"
+      no_log: true
+      diff: false
 
     - name: Join Kubernetes cluster
       ansible.builtin.command:

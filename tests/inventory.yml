@@ -1,0 +1,18 @@
+---
+# Synthetic hosts for syntax checks and local regressions, not provisioned nodes.
+all:
+  vars:
+    ansible_connection: local
+    kubernetes_node_network: "10.0.1.0/24"
+    tailscale_package_version: "1.102.4"
+  children:
+    k8s_nodes:
+      children:
+        control_plane:
+          hosts:
+            test-cp:
+              k8s_node_ip: "10.0.1.11"
+        workers:
+          hosts:
+            test-worker:
+              k8s_node_ip: "10.0.1.12"

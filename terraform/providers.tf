@@ -2,5 +2,5 @@ provider "hcloud" {}
 
 provider "tailscale" {
   tailnet = "-"
-  scopes  = ["auth_keys"]
+  scopes  = ["auth_keys", "devices:core"]
 }

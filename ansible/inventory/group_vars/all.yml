@@ -1,25 +1,22 @@
 ---
-# Hetzner private node network
-kubernetes_node_network: "10.0.1.0/24"
+# Node addresses, private subnet and Tailscale version come from Terraform inventory.
+# Ubuntu 24.04 baseline read from all three working nodes on 2026-10-02.
+kubernetes_package_version: "1.34.12-1.1"
+kubernetes_repo_version: "v{{ kubernetes_package_version.split('.')[0:2] | join('.') }}"
+containerd_package_version: "2.3.6-1~ubuntu.24.04~noble"
+kubernetes_sandbox_image: "registry.k8s.io/pause:3.10.2"
 
 # Kubernetes networking
 kubernetes_pod_cidr: "10.244.0.0/16"
 kubernetes_service_cidr: "10.96.0.0/12"
 
-# Kubernetes package repository: latest patch of this minor
-kubernetes_repo_version: "v1.34"
-
-# Cilium
+# Pinned Cilium chart and bounded ordinary APT cache refreshes
 cilium_version: "1.20.2"
+apt_cache_valid_time: 3600
+
+# Maximum seconds to wait for node connectivity and cloud-init completion.
+bootstrap_connection_timeout: 600
+bootstrap_cloud_init_timeout: 600
 
 # Local admin kubeconfig on the Ansible controller
 kubeconfig_local_path: "{{ lookup('env', 'HOME') }}/.kube/k8s-lab-admin.conf"
-
-# Automatically derive the node's Kubernetes IPv4 address
-k8s_node_ip_candidates: >-
-  {{
-    ansible_facts.all_ipv4_addresses
-    | ansible.utils.ipaddr(kubernetes_node_network)
-  }}
-
-k8s_node_ip: "{{ k8s_node_ip_candidates | first }}"

@@ -5,10 +5,36 @@ package_upgrade: false
 
 ssh_pwauth: false
 
+apt:
+  sources:
+    tailscale:
+      source: deb [signed-by=/etc/apt/keyrings/tailscale.asc] https://pkgs.tailscale.com/stable/ubuntu noble main
+
 packages:
   - ncurses-bin
+  - [tailscale, '${tailscale_package_version}']
 
 write_files:
+  # Hetzner's first private NIC is enp7s0 on current types, ens10 on older types.
+  # A persistent networkd configuration also handles attachment during first boot.
+  - path: /etc/systemd/network/10-hetzner-private.network
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Match]
+      Name=enp7s0 ens10
+
+      [Network]
+      DHCP=ipv4
+
+      [DHCPv4]
+      UseDNS=false
+      UseNTP=false
+  - path: /etc/apt/keyrings/tailscale.asc
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ${indent(6, tailscale_signing_key)}
   - path: /etc/ssh/sshd_config.d/99-hardening.conf
     owner: root:root
     permissions: "0644"
@@ -16,7 +42,9 @@ write_files:
       KbdInteractiveAuthentication no
 
 runcmd:
+  - networkctl reload
   - sshd -t
   - systemctl reload ssh || systemctl reload sshd
-  - curl -fsSL https://tailscale.com/install.sh | sh
+  - apt-mark hold tailscale
+  - systemctl enable --now tailscaled
   - tailscale up --auth-key='${tailscale_auth_key}' --hostname='${hostname}'

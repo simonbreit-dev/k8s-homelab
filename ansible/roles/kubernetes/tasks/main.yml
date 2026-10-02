@@ -1,13 +1,4 @@
 ---
-- name: Verify exactly one Kubernetes private node IP exists
-  ansible.builtin.assert:
-    that:
-      - k8s_node_ip_candidates | length == 1
-    fail_msg: >-
-      Expected exactly one IPv4 address inside
-      {{ kubernetes_node_network }} on {{ inventory_hostname }},
-      found: {{ k8s_node_ip_candidates }}
-
 - name: Verify IPv4 default route exists
   ansible.builtin.command:
     cmd: ip -4 route show default
@@ -36,23 +27,24 @@
     content: |
       net.ipv4.ip_forward = 1
 
-- name: Apply Kubernetes sysctl settings
-  ansible.builtin.command:
-    cmd: sysctl -p /etc/sysctl.d/99-kubernetes.conf
-  changed_when: false
-
 - name: Read IPv4 forwarding state
   ansible.builtin.command:
     cmd: sysctl -n net.ipv4.ip_forward
   register: kubernetes_ipv4_forwarding
   changed_when: false
 
-- name: Verify IPv4 forwarding is enabled
-  ansible.builtin.assert:
-    that:
-      - kubernetes_ipv4_forwarding.stdout | trim == "1"
-    fail_msg: >-
-      net.ipv4.ip_forward is not enabled on {{ inventory_hostname }}.
+- name: Repair IPv4 forwarding drift
+  ansible.builtin.command:
+    cmd: sysctl -w net.ipv4.ip_forward=1
+  when: kubernetes_ipv4_forwarding.stdout | trim != '1'
+  changed_when: true
+
+- name: Verify effective IPv4 forwarding
+  ansible.builtin.command:
+    cmd: sysctl -n net.ipv4.ip_forward
+  register: kubernetes_ipv4_forwarding_effective
+  changed_when: false
+  failed_when: kubernetes_ipv4_forwarding_effective.stdout | trim != '1'
 
 - name: Create APT keyrings directory
   ansible.builtin.file:
@@ -81,17 +73,19 @@
       - "/"
     signed_by: /etc/apt/keyrings/kubernetes.asc
     state: present
+  register: kubernetes_repository
 
 - name: Update APT cache
   ansible.builtin.apt:
     update_cache: true
+    cache_valid_time: "{{ 0 if kubernetes_repository.changed else apt_cache_valid_time }}"
 
 - name: Install Kubernetes packages
   ansible.builtin.apt:
     name:
-      - kubelet
-      - kubeadm
-      - kubectl
+      - "kubelet={{ kubernetes_package_version }}"
+      - "kubeadm={{ kubernetes_package_version }}"
+      - "kubectl={{ kubernetes_package_version }}"
     state: present
 
 - name: Hold Kubernetes packages

@@ -22,15 +22,15 @@ variable "node_count" {
   }
 }
 
-variable "node_image" {
-  type        = string
-  description = "Name of the Hetzner Cloud system image to resolve for the selected server architecture."
-  default     = "ubuntu-24.04"
+variable "node_image_id" {
+  type        = number
+  description = "Fixed Hetzner Cloud Ubuntu 24.04 image ID for the selected architecture. Changing it replaces nodes."
+  default     = 161547269
   nullable    = false
 
   validation {
-    condition     = length(trimspace(var.node_image)) > 0
-    error_message = "node_image must not be empty."
+    condition     = var.node_image_id > 0 && floor(var.node_image_id) == var.node_image_id
+    error_message = "node_image_id must be a positive whole-number Hetzner Cloud image ID."
   }
 }
 
@@ -81,6 +81,18 @@ variable "ssh_public_key" {
   validation {
     condition     = can(regex("^(ssh-|ecdsa-|sk-)[^[:space:]]+[[:space:]]+[^[:space:]]+", trimspace(var.ssh_public_key)))
     error_message = "ssh_public_key must be a complete OpenSSH public key, including its key type and encoded key data."
+  }
+}
+
+variable "tailscale_package_version" {
+  type        = string
+  description = "Exact Tailscale APT package version installed by cloud-init on new nodes."
+  default     = "1.102.4"
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.tailscale_package_version))
+    error_message = "tailscale_package_version must be an exact stable version such as 1.102.4."
   }
 }
 

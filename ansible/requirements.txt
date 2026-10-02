@@ -1,2 +1,2 @@
-netaddr>=0.10.1
-PyYAML>=6.0
+ansible-core==2.21.4
+PyYAML==6.0.3

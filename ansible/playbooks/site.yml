@@ -2,7 +2,14 @@
 - name: Prepare Kubernetes nodes
   hosts: k8s_nodes
   become: true
-  gather_facts: true
+  gather_facts: false
+
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Check bootstrap prerequisites
+      ansible.builtin.import_tasks: ../tasks/preflight.yml
+      tags: always
 
   roles:
     - common
@@ -12,7 +19,7 @@
 - name: Verify Kubernetes private network
   hosts: k8s_nodes
   become: true
-  gather_facts: true
+  gather_facts: false
 
   tasks:
     - name: Check connectivity to all other Kubernetes nodes
@@ -30,20 +37,39 @@
 - name: Initialize Kubernetes control plane
   hosts: control_plane
   become: true
-  gather_facts: true
+  gather_facts: false
   roles:
     - control_plane
 
 - name: Inspect Kubernetes workers
   hosts: workers
   become: true
-  gather_facts: true
+  gather_facts: false
 
   tasks:
     - name: Check whether worker is already joined
       ansible.builtin.stat:
         path: /etc/kubernetes/kubelet.conf
       register: worker_kubelet_conf
+
+    - name: Inspect artifacts from incomplete worker bootstrap
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/kubernetes/bootstrap-kubelet.conf
+        - /var/lib/kubelet/config.yaml
+      register: worker_bootstrap_artifacts
+      when: not worker_kubelet_conf.stat.exists
+
+    - name: Reject incomplete worker bootstrap
+      ansible.builtin.assert:
+        that:
+          - worker_bootstrap_artifacts.results | selectattr('stat.exists') | list | length == 0
+        fail_msg: >-
+          Worker bootstrap artifacts exist without kubelet.conf. Inspect the
+          failed join; bootstrap will not automatically reset
+          an existing or partially configured node.
+      when: not worker_kubelet_conf.stat.exists
 
 - name: Prepare worker bootstrap credentials
   hosts: control_plane
@@ -94,13 +120,13 @@
 - name: Join Kubernetes workers
   hosts: workers
   become: true
-  gather_facts: true
+  gather_facts: false
   roles:
     - worker
 
 - name: Install Kubernetes pod network
   hosts: control_plane
   become: true
-  gather_facts: true
+  gather_facts: false
   roles:
     - cilium

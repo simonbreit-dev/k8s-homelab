@@ -1,0 +1,18 @@
+---
+- name: Wait for nodes to become reachable over Tailscale
+  ansible.builtin.wait_for_connection:
+    connect_timeout: 5
+    sleep: 5
+    timeout: "{{ bootstrap_connection_timeout | default(600) }}"
+
+- name: Wait for successful cloud-init completion
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - --kill-after=5s
+      - "{{ bootstrap_cloud_init_timeout | default(600) }}s"
+      - cloud-init
+      - status
+      - --wait
+      - --long
+  changed_when: false

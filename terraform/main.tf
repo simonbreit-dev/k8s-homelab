@@ -3,8 +3,17 @@ data "hcloud_server_type" "node" {
 }
 
 data "hcloud_image" "node" {
-  name              = var.node_image
-  with_architecture = data.hcloud_server_type.node.architecture
+  id = var.node_image_id
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.architecture == data.hcloud_server_type.node.architecture &&
+        self.os_flavor == "ubuntu" && self.os_version == "24.04"
+      )
+      error_message = "node_image_id must identify Ubuntu 24.04 for the selected server architecture."
+    }
+  }
 }
 
 resource "tailscale_tailnet_key" "node" {
@@ -62,5 +71,6 @@ module "nodes" {
     hcloud_network_subnet.lab.ip_range,
     count.index + 11
   )
-  tailscale_auth_key = tailscale_tailnet_key.node[count.index].key
+  tailscale_auth_key        = tailscale_tailnet_key.node[count.index].key
+  tailscale_package_version = var.tailscale_package_version
 }

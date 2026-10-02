@@ -1,0 +1,135 @@
+---
+- name: Verify supported bootstrap scope
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - groups.get('control_plane', []) | length == 1
+      - groups.get('workers', []) | length >= 1
+      - ansible_play_hosts_all | sort == groups['k8s_nodes'] | sort
+      - groups['control_plane'] | intersect(groups['workers']) | length == 0
+      - groups['k8s_nodes'] | sort == (groups['control_plane'] + groups['workers']) | sort
+    fail_msg: >-
+      Bootstrap requires the complete generated inventory, exactly one control
+      plane and workers. Partial --limit and --check runs are unsupported.
+      Use --syntax-check and the documented local checks for validation.
+  run_once: true
+
+- name: Verify pinned Ansible controller version
+  ansible.builtin.assert:
+    that:
+      - ansible_version.full == '2.21.4'
+    fail_msg: Run make setup and use the controller environment installed from requirements.txt.
+  run_once: true
+
+- name: Verify local controller tools
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - [helm, version, --short]
+    - [kubectl, version, --client, --output=json]
+  loop_control:
+    label: "{{ item[0] }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+
+- name: Verify controller Python dependencies
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - >-
+        import sys; from importlib.metadata import version;
+        assert sys.version_info >= (3, 12), 'Python 3.12 or newer is required';
+        assert version('PyYAML') == '6.0.3', 'Install requirements.txt'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+
+- name: Wait for successful server initialization
+  ansible.builtin.import_tasks: wait-for-cloud-init.yml
+
+- name: Gather node facts
+  ansible.builtin.setup:
+
+- name: Verify supported node environment and inventory
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '24.04'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - kubernetes_node_network is defined
+      - tailscale_package_version is defined
+      - k8s_node_ip is defined
+    fail_msg: >-
+      Expected Ubuntu 24.04 and the generated Terraform inventory with
+      k8s_node_ip, kubernetes_node_network and tailscale_package_version.
+      See README.md for supported images.
+
+- name: Wait for the assigned private node IP
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all'
+      - network
+  register: private_network_facts
+  until: k8s_node_ip in private_network_facts.ansible_facts.ansible_all_ipv4_addresses | default([])
+  retries: 15
+  delay: 2
+  when: k8s_node_ip not in ansible_facts.all_ipv4_addresses
+
+- name: Verify assigned private node IP
+  ansible.builtin.assert:
+    that:
+      - k8s_node_ip in ansible_facts.all_ipv4_addresses
+    fail_msg: >-
+      {{ inventory_hostname }} expects private IP {{ k8s_node_ip }}, but the
+      node has {{ ansible_facts.all_ipv4_addresses }}. Check the Hetzner network
+      attachment, networkctl and journalctl -u systemd-networkd on this node.
+
+- name: Verify unique private node addresses
+  ansible.builtin.assert:
+    that:
+      - >-
+        groups['k8s_nodes'] | map('extract', hostvars, 'k8s_node_ip')
+        | unique | list | length == groups['k8s_nodes'] | length
+    fail_msg: Generated inventory must contain a unique private IP for every node.
+  run_once: true
+
+- name: Read installed bootstrap package versions
+  ansible.builtin.command:
+    expand_argument_vars: false
+    argv:
+      - dpkg-query
+      - -W
+      - '-f=${Package}: "${Version}"\n'
+      - containerd.io
+      - kubeadm
+      - kubelet
+      - kubectl
+      - tailscale
+  register: bootstrap_package_query
+  changed_when: false
+  failed_when: bootstrap_package_query.rc not in [0, 1]
+
+- name: Record installed bootstrap versions
+  ansible.builtin.set_fact:
+    bootstrap_installed_packages: "{{ bootstrap_package_query.stdout | from_yaml | default({}, true) }}"
+
+- name: Reject implicit bootstrap package upgrades or downgrades
+  ansible.builtin.assert:
+    that:
+      - item.key not in bootstrap_installed_packages or bootstrap_installed_packages[item.key] == item.value
+    fail_msg: >-
+      {{ item.key }} differs from the pinned baseline on {{ inventory_hostname }}.
+      Bootstrap does not upgrade existing packages. Follow the documented upgrade
+      procedure or recreate the disposable cluster deliberately.
+  loop: "{{ bootstrap_expected_packages | dict2items }}"
+  vars:
+    bootstrap_expected_packages:
+      containerd.io: "{{ containerd_package_version }}"
+      kubeadm: "{{ kubernetes_package_version }}"
+      kubelet: "{{ kubernetes_package_version }}"
+      kubectl: "{{ kubernetes_package_version }}"
+      tailscale: "{{ tailscale_package_version }}"
